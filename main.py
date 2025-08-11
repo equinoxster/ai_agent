@@ -45,39 +45,101 @@ def main():
     system_prompt = """
     You are a helpful AI coding agent.
 
-    When a user asks a question or makes a request, make a function call plan. You can perform the following operations:
+    When a user asks a question or makes a request, make a function call plan and use the available tools to accomplish the task end-to-end:
 
-    - List files and directories
+    - List files and directories (get_files_info)
+    - Read file contents (get_file_content)
+    - Write or modify files (write_file)
+    - Run a Python file with optional args (run_python_file)
+
+    For bug fixes or changes:
+    1) Reproduce the issue (e.g., run a file or tests),
+    2) Propose a minimal code change,
+    3) Apply the change by writing the file,
+    4) Re-run to verify the fix,
+    5) Summarize what changed and the result.
 
     All paths you provide should be relative to the working directory. You do not need to specify the working directory in your function calls as it is automatically injected for security reasons.
     """
 
     model = "gemini-2.0-flash-001"
-    contents = messages
-    response = client.models.generate_content(
-        model=model, 
-        contents=contents,
-        config=types.GenerateContentConfig(
-            tools=[available_functions], system_instruction=system_prompt),)
-    print(response.text)
-    if (len(response.function_calls) > 0):
-        for function_call_part in response.function_calls:
-            function_call_result = call_function(function_call_part, verbose=verbose)
-            # Validate structure
-            try:
-                if not function_call_result.parts or not getattr(function_call_result.parts[0], "function_response", None):
-                    raise RuntimeError("Invalid tool response structure: missing function_response part")
-            except Exception:
-                raise RuntimeError("Invalid tool response structure: missing function_response part")
 
-            if verbose:
-                print(f"-> {function_call_result.parts[0].function_response.response}")
-    
+    # Iteratively call the model, append candidates, run tools, append tool responses
+    max_iterations = 20
+    step = 0
+    response = None
 
-    if verbose:
+    while step < max_iterations:
+        step += 1
+        try:
+            response = client.models.generate_content(
+                model=model,
+                contents=messages,  # Always pass the full conversation so the model continues from current state
+                config=types.GenerateContentConfig(
+                    tools=[available_functions],
+                    system_instruction=system_prompt,
+                ),
+            )
+
+            # Add each candidate's content to the conversation history
+            candidates = getattr(response, "candidates", None) or []
+            for cand in candidates:
+                content = getattr(cand, "content", None)
+                if content is not None:
+                    messages.append(content)
+
+            # Execute any function calls and append tool responses
+            function_calls = getattr(response, "function_calls", None) or []
+            if len(function_calls) > 0:
+                for function_call_part in function_calls:
+                    function_call_result = call_function(function_call_part, verbose=verbose)
+
+                    # Validate structure
+                    try:
+                        if not function_call_result.parts or not getattr(
+                            function_call_result.parts[0], "function_response", None
+                        ):
+                            raise RuntimeError(
+                                "Invalid tool response structure: missing function_response part"
+                            )
+                    except Exception:
+                        # Print and stop if tool response is malformed
+                        print(
+                            "Error: Invalid tool response structure: missing function_response part",
+                            file=sys.stderr,
+                        )
+                        break
+
+                    if verbose:
+                        print(
+                            f"-> {function_call_result.parts[0].function_response.response}"
+                        )
+
+                    # Append tool response message back into the conversation
+                    messages.append(function_call_result)
+
+                # Continue loop to let the model consume the tool outputs
+                continue
+
+            # If the model returned final text and there are no tool calls, we're done
+            if getattr(response, "text", None):
+                print(response.text)
+                break
+
+            # Neither final text nor tool calls: iterate again until max iterations
+            continue
+
+        except Exception as e:
+            print(f"Error during generate_content at step {step}: {e}", file=sys.stderr)
+            break
+
+    if verbose and response is not None:
         print(f"User prompt: {user_prompt} ")
-        print(f"Prompt tokens: {response.usage_metadata.prompt_token_count}")
-        print(f"Response tokens: {response.usage_metadata.candidates_token_count}")
+        if getattr(response, "usage_metadata", None):
+            print(f"Prompt tokens: {response.usage_metadata.prompt_token_count}")
+            print(
+                f"Response tokens: {response.usage_metadata.candidates_token_count}"
+            )
 
 
 main()
