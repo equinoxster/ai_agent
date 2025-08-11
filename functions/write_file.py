@@ -1,4 +1,5 @@
 import os
+from google import genai
 
 def write_file(working_directory, file_path, content):
     """
@@ -54,3 +55,21 @@ def write_file(working_directory, file_path, content):
         return f"Error: '{file_path}' is a directory, not a file"
     except Exception as e:
         return f"Error: Could not write to file '{file_path}': {str(e)}"
+
+schema_write_file = genai.types.FunctionDeclaration(
+    name="write_file",
+    description="Writes something to a specified file.",
+    parameters=genai.types.Schema(
+        type=genai.types.Type.OBJECT,
+        properties={
+            "file_path": genai.types.Schema(
+                type=genai.types.Type.STRING,
+                description="Path to the file.",
+            ),
+            "content": genai.types.Schema(
+                type=genai.types.Type.STRING,
+                description="The content to write to the file.",
+            ),
+        },
+    ),
+)

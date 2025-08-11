@@ -1,4 +1,5 @@
 import os
+from google import genai
 
 def get_file_content(working_directory, file_path):
     """
@@ -55,3 +56,17 @@ def get_file_content(working_directory, file_path):
         return f"Error: I/O error reading file '{file_path}': {str(e)}"
     except Exception as e:
         return f"Error: Could not read file '{file_path}': {str(e)}"
+
+schema_get_file_content = genai.types.FunctionDeclaration(
+    name="get_file_content",
+    description="Reads specified files content.",
+    parameters=genai.types.Schema(
+        type=genai.types.Type.OBJECT,
+        properties={
+            "file": genai.types.Schema(
+                type=genai.types.Type.STRING,
+                description="Name of the file.",
+            ),
+        },
+    ),
+)
